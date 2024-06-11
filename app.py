@@ -1,13 +1,62 @@
+import csv
 from flask import Flask, request, jsonify
 import uuid
 from firebase import db
 import bcrypt
 from datetime import datetime
+from load_articles import ARTICLES
 from operate_content_model import recommend_for_user
 from operate_collaborative_model import recommend_articles
 
 app = Flask(__name__)
 
+
+@app.get("/search")
+def search_articles():
+    try:
+        query = request.args.get('query', '').lower()
+        sort_by = request.args.get('sort_by', 'title').lower()
+        filter_by_categories = request.args.getlist('categories')  # expecting list of categories
+        page = int(request.args.get('page', 1))
+        per_page = int(request.args.get('per_page', 20))
+
+        # Convert filter_by_categories to lowercase for case insensitive matching
+        filter_by_categories = [cat.lower() for cat in filter_by_categories]
+
+        # Search articles by title
+        filtered_articles = [article for article in ARTICLES if query in article.get('title', '').lower()]
+
+        # Filter by categories
+        if filter_by_categories:
+            filtered_articles = [
+                article for article in filtered_articles if any(
+                    cat in article.get('index_keywords', '').lower() for cat in filter_by_categories
+                )
+            ]
+
+        # Sort articles
+        if sort_by == 'year':
+            filtered_articles.sort(key=lambda x: int(x['year']), reverse=True)
+        elif sort_by == 'cited_by':
+            filtered_articles.sort(key=lambda x: int(x['cited_by']), reverse=True)
+        else:  # Default is to sort by title
+            filtered_articles.sort(key=lambda x: x['title'].lower())
+
+        # Pagination
+        start = (page - 1) * per_page
+        end = start + per_page
+        paginated_articles = filtered_articles[start:end]
+
+        return jsonify({
+            'total_results': len(filtered_articles),
+            'page': page,
+            'per_page': per_page,
+            'articles': paginated_articles
+        }), 200
+
+    except Exception as e:
+        print(f"Error during search articles: {e}")
+        return "Internal Server Error", 500
 
 @app.post("/register")
 def register_user():
@@ -28,7 +77,7 @@ def register_user():
         hashed_password = bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt())
         user_id = str(uuid.uuid4())
         new_user = {
-            'id': user_id,
+            'user_id': user_id,
             'email': email,
             'password': hashed_password.decode('utf-8'),
             'createdAt':datetime.now().isoformat()
@@ -67,14 +116,14 @@ def submit_rating():
             # If the user has already rated the article, update the existing rating
             rating_id = user_ratings_ref[0].id
             db.collection("ratings").document(rating_id).update({
-                "value": int(rating),
+                "article_rating": int(rating),
             })
         else:
             rating_id = str(uuid.uuid1())
             db.collection("ratings").document(rating_id).set({
                 "article_id": article_id,
                 "user_id": user_id,
-                "value": int(rating),
+                "article_rating": int(rating),
             })
             # Update or create user's document in the "users" collection
             user_ref = db.collection("users").document(user_id)
@@ -159,13 +208,34 @@ def getArticles_collaborative():
             return jsonify({"error": "Provide user_id!"}), 400
         
         recommended_articles = recommend_articles(user_id)
-        print("recommended_articles_collab =======> ",recommended_articles)
         return jsonify(recommended_articles)
     except Exception as e:
         print(f"Error internal: {e}")
         return jsonify({"error": "Internal Server Error"}), 500
 
-
+# Function to save articles to Firebase
+@app.post("/save-articles-to-db")
+def save_articles_to_firebase():
+    try:
+        # Open and read the CSV file
+        with open('articles_selected_with_doi.csv', 'r', encoding='utf-8') as csv_file:
+            csv_reader = csv.DictReader(csv_file)
+            
+            # Iterate over each row in the CSV file
+            for row in csv_reader:
+                # Convert cited_by to integer
+                row['cited_by'] = int(row['cited_by'])
+                
+                # Add empty list for rated_users
+                row['rated_users'] = []
+                
+                # Save the article to the Firebase articles collection
+                db.collection('articles').document(row['article_id']).set(row)
+        
+        return "Articles saved to Firebase successfully."
+    
+    except Exception as e:
+        return f"Error saving articles to Firebase: {e}"
 
 
 if __name__ == "__main__":

@@ -95,13 +95,13 @@ def recommend_for_user(user_id):
             user_idx = user_index_mapping.get(rating['user_id'])
             article_idx = next((idx for idx, article in enumerate(articles) if article['article_id'] == rating['article_id']), None)
             if user_idx is not None and article_idx is not None:
-                user_article_matrix[user_idx, article_idx] = rating['value']
+                user_article_matrix[user_idx, article_idx] = rating['article_rating']
 
         user_ratings = [rating for rating in ratings if rating['user_id'] == user_id]
 
         if user_ratings:
             # 
-            top_rated_article_id = max(user_ratings, key=lambda x: x['value'])['article_id']
+            top_rated_article_id = max(user_ratings, key=lambda x: x['article_rating'])['article_id']
             similar_articles = get_recommendations(top_rated_article_id, cosine_sim)
             similar_articles = [article for article in similar_articles if article['article_id'] not in [rating['article_id'] for rating in user_ratings]]
             similar_articles = sorted(similar_articles, key=lambda x: x.get('cited_by', 0), reverse=True)
