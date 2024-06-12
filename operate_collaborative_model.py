@@ -92,6 +92,8 @@ def recommend_articles(user_id, num_recommendations=10):
         df_article = pd.DataFrame(ARTICLES)
         ratings_ref = db.collection("ratings").stream()
         df_rating = pd.DataFrame([doc.to_dict() for doc in ratings_ref])
+        df_rating['article_id']=df_rating['article_id'].astype(int)
+        df_rating['article_rating']=df_rating['article_rating'].astype(int)
         users_ref = db.collection("users").stream()
         df_user = pd.DataFrame([{key: value for key, value in doc.to_dict().items() if key != 'rated_articles'} for doc in users_ref])
 
@@ -146,8 +148,8 @@ def recommend_articles(user_id, num_recommendations=10):
             top_articles = df_article[df_article['article_id'].isin(top_article_ids)].sort_values(by='cited_by', ascending=False)
         else:
             # User not found, recommend top-rated articles overall
-            avg_ratings = df_rating.groupby('article_id')['value'].mean().sort_values(ascending=False)
-            top_article_ids = avg_ratings.index[:num_recommendations].tolist()
+            avg_ratings = df_rating.groupby('article_id')['article_rating'].mean().sort_values(ascending=False)
+            top_article_ids = avg_ratings.index[:num_recommendations+1].tolist()
             top_articles = df_article[df_article['article_id'].isin(top_article_ids)].sort_values(by='cited_by', ascending=False)
 
         return top_articles.to_dict(orient='records')

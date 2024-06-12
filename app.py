@@ -94,7 +94,7 @@ def register_user():
 def submit_rating():
     try:
         data = request.get_json()
-        rating = data.get('rating')
+        rating = data.get('article_rating')
         article_id = data.get('article_id')
         user_id = data.get('user_id')
 
@@ -192,7 +192,7 @@ def getArticles_content():
         if not user_id:
             return jsonify({"error": "Provide user_id!"}), 400
         recommended_articles = recommend_for_user(user_id)
-        print("recommended_articles =======> ",recommended_articles)
+        # print("recommended_articles =======> ",recommended_articles)
         return jsonify(recommended_articles)
     except Exception as e:
         print(f"Error internal: {e}")
@@ -208,6 +208,7 @@ def getArticles_collaborative():
             return jsonify({"error": "Provide user_id!"}), 400
         
         recommended_articles = recommend_articles(user_id)
+        print("recommended_articles =======> ",len(recommended_articles))
         return jsonify(recommended_articles)
     except Exception as e:
         print(f"Error internal: {e}")
