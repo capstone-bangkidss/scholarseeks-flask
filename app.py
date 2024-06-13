@@ -10,6 +10,53 @@ from operate_collaborative_model import recommend_articles
 
 app = Flask(__name__)
 
+@app.get("/articles/<article_id>")
+def get_an_article(article_id):
+    try:
+        if not article_id:
+            return "Article ID must be provided and cannot be undefined", 400
+        print(article_id)
+        doc_ref = db.collection("articles").document(article_id)
+        doc = doc_ref.get()
+        if doc.exists:
+            return jsonify(doc.to_dict()), 200
+        else:
+            return "Article does not exist!", 404
+
+    except Exception as e:
+        return "Internal Server Error", 500
+    
+@app.get("/articles/favorite/<user_id>")
+def get_rated_articles(user_id):
+    try:
+        if not user_id:
+            return "User ID must be provided and cannot be undefined", 400
+        
+        # Fetch user document
+        doc_ref = db.collection("users").document(user_id)
+        doc = doc_ref.get()
+        articles_ids = []
+        if doc.exists:
+            articles_ids = doc.to_dict().get("rated_articles", [])
+        else:
+            return "User does not exist!", 404
+        
+        if not articles_ids:
+            return jsonify([]), 200
+        
+        # Fetch all articles in articles_ids
+        articles_ref = db.collection("articles")
+        articles = []
+        for article_id in articles_ids:
+            article_doc = articles_ref.document(article_id).get()
+            if article_doc.exists:
+                articles.append(article_doc.to_dict())
+        
+        return jsonify(articles), 200
+
+    except Exception as e:
+        print(f"Error fetching rated articles: {e}")
+        return "Internal Server Error", 500
 
 @app.get("/search")
 def search_articles():
