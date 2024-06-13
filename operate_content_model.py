@@ -190,6 +190,7 @@ def recommend_for_user(user_id, model=MODEL_CONTENT, num_recommendations=10):
         recommended_articles_dict = pd.DataFrame(recommended_articles).head(num_recommendations).to_dict(orient='records')
         return recommended_articles_dict
     else:
+        # why no subject area input?
         # New user logic
         input_shape = user_article_matrix.shape[1]
         user_vector = np.zeros((1, input_shape))  # Use a zero vector for new users

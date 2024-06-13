@@ -105,6 +105,46 @@ def search_articles():
         print(f"Error during search articles: {e}")
         return "Internal Server Error", 500
 
+
+@app.post("/subject_area")
+def submit_subject_area():
+    try:
+        data = request.get_json()
+        subject_area = data.get('subject_area').lower()
+        if not subject_area:
+            return "Subject area must be provided and cannot be undefined", 400
+
+        user_id = request.args.get('user_id', '')
+
+        # check if session_id is authenticated
+        # if unauthenticated, push new user without email and name (guest), and return it to frontend
+        if not user_id:
+            # create a guest account
+            new_user = {
+                'user_id':str(uuid.uuid4()),
+                'subject_area':subject_area,
+                'email':'',
+                'name':'',
+                'createdAt':datetime.now().isoformat()
+            }
+            db.collection('users').document(user_id).set(new_user)
+            # Backend Issues JWT: generates a custom JWT containing user ID and other necessary claims.
+            jwt_token = ''
+            return jsonify(new_user,jwt_token), 201
+        else:
+            user = db.collection("users").document(user_id).get()
+            if not user.exists:
+                return jsonify({"error": "User not found!"}), 404
+            
+            db.collection('users').document(user_id).update({
+                'subject_area':subject_area,
+            })
+            user = db.collection("users").document(user_id).get().to_dict()
+            return jsonify(user), 201
+
+    except Exception as e:
+        return "Internal Server Error", 500
+    
 @app.post("/register")
 def register_user():
     try:
