@@ -1,16 +1,53 @@
 import csv
 from flask import Flask, request, jsonify
 import uuid
+
+import requests
 from firebase import db
 import bcrypt
-from datetime import datetime
+from datetime import datetime, timedelta
 from load_articles import ARTICLES
 from operate_content_model import recommend_for_user
 from operate_collaborative_model import recommend_articles
+from google.oauth2 import id_token
+import requests
+import jwt
+from functools import wraps
+import os
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
 
 app = Flask(__name__)
 
+# Configuration
+JWT_EXP_DELTA_HOURS = 24
+
+
+def token_required(f):
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        token = request.headers.get('Authorization')
+        if not token:
+            return jsonify({'message': 'JWT token is missing!'}), 403
+        try:
+            token = token.split(" ")[1]  # Split "Bearer <JWT_TOKEN>"
+            data = jwt.decode(token, os.getenv('JWT_SECRET'), algorithms=["HS256"])
+            print(data)
+            request.user = data  # Attach decoded user info to the request
+        except jwt.ExpiredSignatureError:
+            return jsonify({"error": "Token is expired, your session has terminated!"}), 401
+        except jwt.DecodeError:
+            return jsonify({"error": "Failed to decode token"}), 401
+        except jwt.InvalidTokenError:
+            return jsonify({"error": "Invalid token"}), 401
+        return f(*args, **kwargs)
+
+    return decorated
+        
 @app.get("/articles/<article_id>")
+@token_required
 def get_an_article(article_id):
     try:
         if not article_id:
@@ -27,6 +64,7 @@ def get_an_article(article_id):
         return "Internal Server Error", 500
     
 @app.get("/articles/favorite/<user_id>")
+@token_required
 def get_rated_articles(user_id):
     try:
         if not user_id:
@@ -59,6 +97,7 @@ def get_rated_articles(user_id):
         return "Internal Server Error", 500
 
 @app.get("/search")
+@token_required
 def search_articles():
     try:
         query = request.args.get('query', '').lower()
@@ -114,23 +153,31 @@ def submit_subject_area():
         if not subject_area:
             return "Subject area must be provided and cannot be undefined", 400
 
-        user_id = request.args.get('user_id', '')
+        user_id = data.get('user_id')
 
         # check if session_id is authenticated
         # if unauthenticated, push new user without email and name (guest), and return it to frontend
         if not user_id:
             # create a guest account
+            user_id = str(uuid.uuid4())
             new_user = {
-                'user_id':str(uuid.uuid4()),
+                'user_id':user_id,
                 'subject_area':subject_area,
                 'email':'',
                 'name':'',
+                'rated_articles':[],
                 'createdAt':datetime.now().isoformat()
             }
             db.collection('users').document(user_id).set(new_user)
             # Backend Issues JWT: generates a custom JWT containing user ID and other necessary claims.
-            jwt_token = ''
-            return jsonify(new_user,jwt_token), 201
+            payload = {
+                'user_id': user_id,
+                'email': "",
+                'name': "",
+                'exp': datetime.now()- timedelta(hours=7)+ timedelta(hours=JWT_EXP_DELTA_HOURS)
+            }
+            jwt_token = jwt.encode(payload, os.getenv('JWT_SECRET'), algorithm="HS256")
+            return jsonify({"jwt_token":jwt_token},{"user":new_user}), 201
         else:
             user = db.collection("users").document(user_id).get()
             if not user.exists:
@@ -145,39 +192,97 @@ def submit_subject_area():
     except Exception as e:
         return "Internal Server Error", 500
     
-@app.post("/register")
-def register_user():
+# @app.post("/register")
+# @token_required
+# def register_user():
+#     try:
+#         data = request.get_json()
+#         email = data.get('email')
+#         password = data.get('password')
+
+#         if not email or not password:
+#             return "Email and password must be provided and cannot be undefined", 400
+
+#         users_ref = db.collection('users')
+#         query = users_ref.where('email', '==', email).stream()
+
+#         for doc in query:
+#             return "Email already exists!", 409
+
+#         hashed_password = bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt())
+#         user_id = str(uuid.uuid4())
+#         new_user = {
+#             'user_id': user_id,
+#             'email': email,
+#             'password': hashed_password.decode('utf-8'),
+#             'createdAt':datetime.now().isoformat()
+#         }
+
+#         users_ref.document(user_id).set(new_user)
+#         return jsonify(new_user), 201
+
+#     except Exception as e:
+#         print(f"Error during user registration: {e}")
+#         return "Internal Server Error", 500
+
+
+
+@app.post("/auth/google")
+@token_required
+def auth_google():
     try:
         data = request.get_json()
-        email = data.get('email')
-        password = data.get('password')
+        id_token = data.get("id_token")
+        user_id = data.get("user_id")
 
-        if not email or not password:
-            return "Email and password must be provided and cannot be undefined", 400
+        if not user_id:
+            return "User ID must be provided and cannot be undefined", 400
 
-        users_ref = db.collection('users')
-        query = users_ref.where('email', '==', email).stream()
+        if not id_token:
+            return "ID token must be provided and cannot be undefined", 400
 
-        for doc in query:
-            return "Email already exists!", 409
+        # Verify the ID token with Google
+        response = requests.get(f'https://oauth2.googleapis.com/tokeninfo?id_token={id_token}')
+        if response.status_code != 200:
+            return jsonify({"error": "Invalid google token"}), 400
 
-        hashed_password = bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt())
-        user_id = str(uuid.uuid4())
-        new_user = {
+        user_info = response.json()
+        email = user_info.get('email')
+        name = user_info.get('name', '')
+        
+        # Check if the user exists in database, and create if not
+        # if not authenticated, push new user without email and name (guest), and return it to frontend
+        # update the guest account
+        user_ref = db.collection("users").where("email", "==", email).get()
+        if not user_ref:
+            # update current guest to be registered account with email and name
+            update_user = {
+                    'email':email,
+                    'name':name,
+                }
+            db.collection('users').document(user_id).update(update_user)
+            user = db.collection("users").document(user_id).get().to_dict()
+        else :
+            user = db.collection("users").document(user_id).get().to_dict()
+        
+        # Step 4: Generate a custom JWT
+        payload = {
             'user_id': user_id,
             'email': email,
-            'password': hashed_password.decode('utf-8'),
-            'createdAt':datetime.now().isoformat()
+            'name': name,
+            'exp': datetime.now()- timedelta(hours=7)+ timedelta(hours=JWT_EXP_DELTA_HOURS)
         }
-
-        users_ref.document(user_id).set(new_user)
-        return jsonify(new_user), 201
-
-    except Exception as e:
-        print(f"Error during user registration: {e}")
-        return "Internal Server Error", 500
+        jwt_token = jwt.encode(payload, os.getenv('JWT_SECRET'), algorithm="HS256")
+        
+        # Step 5: Send the JWT back to the frontend
+        return jsonify({'jwt_token': jwt_token,'user':user}), 200
     
+    except Exception as e:
+        print(f"Error: {e}")
+        return jsonify({"error": "Authentication failed"}), 400
+
 @app.post("/rating")
+@token_required
 def submit_rating():
     try:
         data = request.get_json()
@@ -228,6 +333,7 @@ def submit_rating():
         return jsonify({"error": "Internal Server Error"}), 500
     
 @app.delete("/rating")
+@token_required
 def delete_rating():
     try:
         data = request.get_json()
@@ -272,6 +378,7 @@ def delete_rating():
     
 
 @app.post("/content-model/get-articles")
+@token_required
 def getArticles_content():
     try:
         data = request.get_json()
@@ -286,6 +393,7 @@ def getArticles_content():
         return jsonify({"error": "Internal Server Error"}), 500
     
 @app.post("/collaborative-model/get-articles")
+@token_required
 def getArticles_collaborative():
     try:
         data = request.get_json()
@@ -303,6 +411,7 @@ def getArticles_collaborative():
 
 # Function to save articles to Firebase
 @app.post("/save-articles-to-db")
+@token_required
 def save_articles_to_firebase():
     try:
         # Open and read the CSV file
