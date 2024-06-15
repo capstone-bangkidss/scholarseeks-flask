@@ -2,7 +2,6 @@ import csv
 from flask import Flask, request, jsonify
 import uuid
 
-import requests
 from firebase import db
 import bcrypt
 from datetime import datetime, timedelta
@@ -10,7 +9,7 @@ from load_articles import ARTICLES
 from operate_content_model import recommend_for_user
 from operate_collaborative_model import recommend_articles
 from google.oauth2 import id_token
-import requests
+from google.auth.transport import requests
 import jwt
 from functools import wraps
 import os
@@ -22,7 +21,7 @@ load_dotenv()
 app = Flask(__name__)
 
 # Configuration
-JWT_EXP_DELTA_HOURS = 24
+JWT_EXP_DELTA_HOURS = 72
 
 
 def token_required(f):
@@ -227,29 +226,35 @@ def submit_subject_area():
 
 
 
+
+
 @app.post("/auth/google")
 @token_required
 def auth_google():
     try:
         data = request.get_json()
-        id_token = data.get("id_token")
+        id_token_str = data.get("id_token")
         user_id = data.get("user_id")
 
         if not user_id:
             return "User ID must be provided and cannot be undefined", 400
 
-        if not id_token:
+        if not id_token_str:
             return "ID token must be provided and cannot be undefined", 400
 
         # Verify the ID token with Google
-        response = requests.get(f'https://oauth2.googleapis.com/tokeninfo?id_token={id_token}')
-        if response.status_code != 200:
+        try:
+            id_info = id_token.verify_oauth2_token(id_token_str, requests.Request(), os.getenv('WEB_CLIENT_ID'))
+
+            if id_info['iss'] not in ['accounts.google.com', 'https://accounts.google.com']:
+                raise ValueError('Wrong issuer.')
+
+            email = id_info.get('email')
+            name = id_info.get('name', '')
+
+        except ValueError:
             return jsonify({"error": "Invalid google token"}), 400
 
-        user_info = response.json()
-        email = user_info.get('email')
-        name = user_info.get('name', '')
-        
         # Check if the user exists in database, and create if not
         # if not authenticated, push new user without email and name (guest), and return it to frontend
         # update the guest account
@@ -262,7 +267,7 @@ def auth_google():
                 }
             db.collection('users').document(user_id).update(update_user)
             user = db.collection("users").document(user_id).get().to_dict()
-        else :
+        else:
             user = db.collection("users").document(user_id).get().to_dict()
         
         # Step 4: Generate a custom JWT
@@ -275,7 +280,7 @@ def auth_google():
         jwt_token = jwt.encode(payload, os.getenv('JWT_SECRET'), algorithm="HS256")
         
         # Step 5: Send the JWT back to the frontend
-        return jsonify({'jwt_token': jwt_token,'user':user}), 200
+        return jsonify({'jwt_token': jwt_token, 'user': user}), 200
     
     except Exception as e:
         print(f"Error: {e}")

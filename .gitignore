@@ -6,3 +6,4 @@ tes.json
 models/
 notes.txt
 ContentBasedFilteringModel_archive.keras
+.env
