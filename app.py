@@ -45,55 +45,7 @@ def token_required(f):
 
     return decorated
         
-@app.get("/articles/<article_id>")
-@token_required
-def get_an_article(article_id):
-    try:
-        if not article_id:
-            return "Article ID must be provided and cannot be undefined", 400
-        print(article_id)
-        doc_ref = db.collection("articles").document(article_id)
-        doc = doc_ref.get()
-        if doc.exists:
-            return jsonify(doc.to_dict()), 200
-        else:
-            return "Article does not exist!", 404
 
-    except Exception as e:
-        return "Internal Server Error", 500
-    
-@app.get("/articles/favorite/<user_id>")
-@token_required
-def get_rated_articles(user_id):
-    try:
-        if not user_id:
-            return "User ID must be provided and cannot be undefined", 400
-        
-        # Fetch user document
-        doc_ref = db.collection("users").document(user_id)
-        doc = doc_ref.get()
-        articles_ids = []
-        if doc.exists:
-            articles_ids = doc.to_dict().get("rated_articles", [])
-        else:
-            return "User does not exist!", 404
-        
-        if not articles_ids:
-            return jsonify([]), 200
-        
-        # Fetch all articles in articles_ids
-        articles_ref = db.collection("articles")
-        articles = []
-        for article_id in articles_ids:
-            article_doc = articles_ref.document(article_id).get()
-            if article_doc.exists:
-                articles.append(article_doc.to_dict())
-        
-        return jsonify(articles), 200
-
-    except Exception as e:
-        print(f"Error fetching rated articles: {e}")
-        return "Internal Server Error", 500
 
 @app.get("/search")
 @token_required
@@ -270,7 +222,7 @@ def auth_google():
         else:
             user = db.collection("users").document(user_id).get().to_dict()
         
-        # Step 4: Generate a custom JWT
+        # Generate a custom JWT
         payload = {
             'user_id': user_id,
             'email': email,
@@ -279,14 +231,117 @@ def auth_google():
         }
         jwt_token = jwt.encode(payload, os.getenv('JWT_SECRET'), algorithm="HS256")
         
-        # Step 5: Send the JWT back to the frontend
+        # Send the JWT back to the frontend
         return jsonify({'jwt_token': jwt_token, 'user': user}), 200
     
     except Exception as e:
         print(f"Error: {e}")
         return jsonify({"error": "Authentication failed"}), 400
 
-@app.post("/rating")
+# add favorite (one article)
+@app.post("/articles/favorite")
+@token_required
+def add_to_favorite():
+    try:
+        data = request.get_json()
+        article_id = data.get('article_id')
+        user_id = data.get('user_id')
+
+        if not article_id or not user_id:
+            return jsonify({"error": "Provide rating, article_id, and user_id!"}), 400
+        
+        # Check if the article exists
+        article_ref = db.collection("articles").document(article_id).get()
+        if not article_ref.exists:
+            return jsonify({"error": "Article not found"}), 404
+        # Check if the user exists
+        user_ref = db.collection("users").document(user_id).get()
+        if not user_ref.exists:
+            return jsonify({"error": "User not found"}), 404
+        
+        # Update user's document in the "users" collection "favorite_articles" field
+        user_ref = db.collection("users").document(user_id)
+        user_data = user_ref.get().to_dict()
+        favorites_article = user_data.get("favorite_articles", [])
+        favorites_article.append(article_id)
+        user_ref.update({
+            "favorite_articles": favorites_article,
+        })
+
+        return jsonify({"message": "Add to favorites successfully"}), 201
+
+    except Exception as e:
+        print(f"Error internal: {e}")
+        return jsonify({"error": "Internal Server Error"}), 500
+
+# delete favorite (one article)
+@app.delete("/articles/favorite")
+@token_required
+def remove_from_favorite():
+    try:
+        data = request.get_json()
+        article_id = data.get('article_id')
+        user_id = data.get('user_id')
+
+        if not article_id or not user_id:
+            return jsonify({"error": "Provide article_id and user_id!"}), 400
+
+        # Check if the user exists
+        user_ref = db.collection("users").document(user_id).get()
+        if not user_ref.exists:
+            return jsonify({"error": "User not found"}), 404
+
+        # Update the user's favorite_articles list
+        user_data = user_ref.to_dict()
+        favorite_articles = user_data.get("favorite_articles", [])
+        if article_id in favorite_articles:
+            favorite_articles.remove(article_id)
+            db.collection("users").document(user_id).update({
+                "favorite_articles": favorite_articles
+            })
+
+        return jsonify({"message": "Remove from favorites successfully"}), 200
+
+    except Exception as e:
+        print(f"Error during rating deletion: {e}")
+        return jsonify({"error": "Internal Server Error"}), 500
+
+# get all articles favorited by user_id
+@app.get("/articles/favorite/<user_id>")
+@token_required
+def get_favorite_articles(user_id):
+    try:
+        if not user_id:
+            return "User ID must be provided and cannot be undefined", 400
+        
+        # Fetch user document
+        doc_ref = db.collection("users").document(user_id)
+        doc = doc_ref.get()
+        articles_ids = []
+        if doc.exists:
+            articles_ids = doc.to_dict().get("favorite_articles", [])
+        else:
+            return "User does not exist!", 404
+        
+        if not articles_ids:
+            return jsonify([]), 200
+        
+        # Fetch all articles in articles_ids
+        articles_ref = db.collection("articles")
+        articles = []
+        for article_id in articles_ids:
+            article_doc = articles_ref.document(article_id).get()
+            if article_doc.exists:
+                articles.append(article_doc.to_dict())
+        
+        return jsonify(articles), 200
+
+    except Exception as e:
+        print(f"Error fetching favorited articles: {e}")
+        return "Internal Server Error", 500
+    
+# give rating (one article)
+@app.post("/articles/rating")
 @token_required
 def submit_rating():
     try:
@@ -336,8 +391,9 @@ def submit_rating():
     except Exception as e:
         print(f"Error internal: {e}")
         return jsonify({"error": "Internal Server Error"}), 500
-    
-@app.delete("/rating")
+
+# delete rating (one article)
+@app.delete("/articles/rating")
 @token_required
 def delete_rating():
     try:
@@ -380,6 +436,60 @@ def delete_rating():
     except Exception as e:
         print(f"Error during rating deletion: {e}")
         return jsonify({"error": "Internal Server Error"}), 500
+
+# get all articles rated by user_id
+@app.get("/articles/rating/<user_id>")
+@token_required
+def get_rated_articles(user_id):
+    try:
+        if not user_id:
+            return "User ID must be provided and cannot be undefined", 400
+        
+        # Fetch user document
+        doc_ref = db.collection("users").document(user_id)
+        doc = doc_ref.get()
+        articles_ids = []
+        if doc.exists:
+            articles_ids = doc.to_dict().get("rated_articles", [])
+        else:
+            return "User does not exist!", 404
+        
+        if not articles_ids:
+            return jsonify([]), 200
+        
+        # Fetch all articles in articles_ids
+        articles_ref = db.collection("articles")
+        articles = []
+        for article_id in articles_ids:
+            article_doc = articles_ref.document(article_id).get()
+            if article_doc.exists:
+                articles.append(article_doc.to_dict())
+        
+        return jsonify(articles), 200
+
+    except Exception as e:
+        print(f"Error fetching rated articles: {e}")
+        return "Internal Server Error", 500
+
+# get one article
+@app.get("/articles/<article_id>")
+@token_required
+def get_an_article(article_id):
+    try:
+        if not article_id:
+            return "Article ID must be provided and cannot be undefined", 400
+        print(article_id)
+        doc_ref = db.collection("articles").document(article_id)
+        doc = doc_ref.get()
+        if doc.exists:
+            return jsonify(doc.to_dict()), 200
+        else:
+            return "Article does not exist!", 404
+
+    except Exception as e:
+        return "Internal Server Error", 500
+
+
     
 
 @app.post("/content-model/get-articles")
