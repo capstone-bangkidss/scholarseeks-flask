@@ -15,7 +15,6 @@ def token_required(f):
         try:
             token = token.split(" ")[1]  # Split "Bearer <JWT_TOKEN>"
             data = jwt.decode(token, os.getenv('JWT_SECRET'), algorithms=["HS256"])
-            print(data)
             request.user = data  # Attach decoded user info to the request
         except jwt.ExpiredSignatureError:
             return jsonify({"error": "Token is expired, your session has terminated!"}), 401

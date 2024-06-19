@@ -133,6 +133,8 @@ def submit_rating():
         if not user_ref.exists:
             return jsonify({"error": "User not found"}), 404
         
+        # check if user doc has email in it, if no, return 403
+        
         # Check if the user has already rated the article
         user_ratings_ref = db.collection("ratings").where("user_id", "==", user_id).where("article_id", "==", article_id).get()
         if user_ratings_ref:
@@ -252,7 +254,7 @@ def get_an_article(article_id):
     try:
         if not article_id:
             return "Article ID must be provided and cannot be undefined", 400
-        print(article_id)
+        # print(article_id)
         doc_ref = db.collection("articles").document(article_id)
         doc = doc_ref.get()
         if doc.exists:

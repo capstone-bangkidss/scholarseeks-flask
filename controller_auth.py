@@ -61,15 +61,11 @@ def submit_subject_area():
         return "Internal Server Error", 500
 
 @app.route("/auth/google",methods=['POST'])
-@token_required
 def auth_google():
     try:
         data = request.get_json()
         id_token_str = data.get("id_token")
         user_id = data.get("user_id")
-
-        if not user_id:
-            return "User ID must be provided and cannot be undefined", 400
 
         if not id_token_str:
             return "ID token must be provided and cannot be undefined", 400
@@ -86,13 +82,18 @@ def auth_google():
 
         except ValueError:
             return jsonify({"error": "Invalid google token"}), 400
-
+        
         # Check if the user exists in database, and create if not
         # if not authenticated, push new user without email and name (guest), and return it to frontend
         # update the guest account
         user_ref = db.collection("users").where("email", "==", email).get()
         if not user_ref:
+            # register scenario
             # update current guest to be registered account with email and name
+            if not user_id:
+                # but user should already had session, with user_id.
+                # why? because register only on home page (after user have session), not in landing page (user has no session yet)
+                return "To register, User ID must be provided and cannot be undefined", 400
             update_user = {
                     'email':email,
                     'name':name,
@@ -100,7 +101,8 @@ def auth_google():
             db.collection('users').document(user_id).update(update_user)
             user = db.collection("users").document(user_id).get().to_dict()
         else:
-            user = db.collection("users").document(user_id).get().to_dict()
+            # login scenario
+            user = user_ref[0].to_dict()
         
         # Generate a custom JWT
         payload = {

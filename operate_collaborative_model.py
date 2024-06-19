@@ -87,7 +87,7 @@ def fetch_and_create_users_encoding():
 #         print(f"Error recommending articles: {e}")
 #         return []
 
-def recommend_articles(user_id, num_recommendations=10):
+def recommend_articles(user_id, num_recommendations=12):
     try:
         df_article = pd.DataFrame(ARTICLES)
         ratings_ref = db.collection("ratings").stream()
@@ -100,7 +100,7 @@ def recommend_articles(user_id, num_recommendations=10):
         # Merge ratings with articles and users for better context
         merged_df = pd.merge(df_rating, df_article, on='article_id')
         merged_df = pd.merge(merged_df, df_user, on='user_id')
-        print("merged_df ===>",merged_df)
+        # print("merged_df ===>",merged_df)
         # Encode user_id and article_id
         user_ids = merged_df['user_id'].unique().tolist()
         article_ids = merged_df['article_id'].unique().tolist()
@@ -124,20 +124,20 @@ def recommend_articles(user_id, num_recommendations=10):
             # Generate article IDs for prediction
             article_ids = np.array(list(article2article_encoded.keys()))
             article_indices = np.array(list(article2article_encoded.values()))
-            print("user2user_encoded ====>",user2user_encoded)
-            print("article_ids ===>", article_ids)
-            print("rated_article_indices ===>", article_indices)
+            # print("user2user_encoded ====>",user2user_encoded)
+            # print("article_ids ===>", article_ids)
+            # print("rated_article_indices ===>", article_indices)
             # Filter out already rated articles
             mask = np.isin(article_indices, rated_article_indices, invert=True)
             article_ids = article_ids[mask]
             article_indices = article_indices[mask]
-            print("mask ===>", mask)
+            # print("mask ===>", mask)
 
 
             user_array = np.full(len(article_ids), user_encoded)
             prediction_input = [user_array, article_indices]
 
-            print("prediction_input ===>", prediction_input)
+            # print("prediction_input ===>", prediction_input)
 
             # Get model predictions
             ratings_pred = MODEL_COLLABORATIVE.predict(prediction_input).flatten()
